@@ -1,20 +1,16 @@
-package com.ilubov.hikvision.config;
+package com.ilubov.hikvision.vo;
 
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
 
 /**
- * 海康车牌摄像头相关参数
+ * 海康摄像头相关参数
  *
  * @author ilubov
- * @date 2022/4/21
+ * @date 2022/5/3
  */
 @Data
-@Configuration
-@ConfigurationProperties("hk")
-public class HkProperty {
+public class HkCameraParam {
 
     @ApiModelProperty("已登录设备的IP地址")
     private String deviceIp;
@@ -27,7 +23,4 @@ public class HkProperty {
 
     @ApiModelProperty("端口号")
     private Short port;
-
-    @ApiModelProperty("加载文件路径")
-    private String path;
 }

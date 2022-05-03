@@ -1,59 +1,71 @@
-package com.ilubov.hikvision.component;
+package com.ilubov.hikvision.service;
 
-import com.ilubov.hikvision.config.HkProperty;
+import cn.hutool.core.util.StrUtil;
+import com.google.common.collect.Lists;
+import com.ilubov.hikvision.config.HkCameraProperty;
 import com.ilubov.hikvision.sdk.HCNetSDK;
 import com.ilubov.hikvision.util.OsSelect;
+import com.ilubov.hikvision.vo.HkCameraParam;
+import com.sun.jna.Memory;
 import com.sun.jna.Native;
 import com.sun.jna.Pointer;
+import com.sun.jna.ptr.IntByReference;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.UnsupportedEncodingException;
 import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.UUID;
 
 /**
- * 初始化
+ * 海康车牌摄像头初始化
  *
  * @author ilubov
- * @date 2022/4/21
+ * @date 2022/5/3
  */
 @Slf4j
 @Component
-public class HkInit {
+public class HkCameraService {
 
     @Autowired
-    private HkProperty hkProperty;
+    private HkCameraProperty property;
 
     static HCNetSDK hCNetSDK = null;
 
+    // rtsp://${username}:${password}@${ip}:554/h265/ch1/main/av_stream
+    private static final String RTSP_URL = "rtsp://%s:%s@%s:554/h265/ch1/main/av_stream";
+
     /**
-     * 初始化
+     * 海康车牌摄像头初始化
      */
     @PostConstruct
     public void init() {
-        this.init(hkProperty.getDeviceIp(), hkProperty.getUsername(), hkProperty.getPassword(), hkProperty.getPort());
+        HkCameraParam plateNumber = property.getPlateNumber();
+        this.plateNumberInit(plateNumber.getDeviceIp(), plateNumber.getUsername(), plateNumber.getPassword(), plateNumber.getPort());
     }
 
     /**
-     * 初始化
+     * 海康车牌摄像头初始化
      */
-    public void init(String deviceIp, String username, String password, Short port) {
+    public void plateNumberInit(String deviceIp, String username, String password, Short port) {
         if (hCNetSDK == null) {
-            if (!createSDKInstance()) {
-                log.info("【海康初始化】加载SDK失败");
+            if (!this.createSDKInstance()) {
+                log.info("【海康车牌摄像头初始化】加载SDK失败");
                 return;
             }
         }
-        // linux系统建议调用以下接口加载组件库
-        this.loadLinuxLib();
         // 初始化
         if (!hCNetSDK.NET_DVR_Init()) {
-            log.info("【海康初始化】初始化失败");
+            log.info("【海康车牌摄像头初始化】初始化失败");
             return;
         }
-        log.info("【海康初始化】初始化成功");
+        log.info("【海康车牌摄像头初始化】初始化成功");
         // 设置连接时间与重连时间
         this.connect();
         // 设备信息
@@ -88,8 +100,10 @@ public class HkInit {
                 } else {
                     path = "/libhcnetsdk.so";
                 }
-                log.info("【海康初始化】LOAD_PATH: {}", hkProperty.getPath() + path);
-                hCNetSDK = (HCNetSDK) Native.loadLibrary(hkProperty.getPath() + path, HCNetSDK.class);
+                log.info("【海康初始化】LOAD_PATH: {}", property.getSdkPath() + path);
+                hCNetSDK = (HCNetSDK) Native.loadLibrary(property.getSdkPath() + path, HCNetSDK.class);
+                // linux系统建议调用以下接口加载组件库
+                this.loadLinuxLib();
             }
         }
         return true;
@@ -103,10 +117,11 @@ public class HkInit {
             return;
         }
         // linux系统建议调用以下接口加载组件库
+        log.info("【海康初始化】linux系统加载组件库");
         HCNetSDK.BYTE_ARRAY ptrByteArray1 = new HCNetSDK.BYTE_ARRAY(256);
         HCNetSDK.BYTE_ARRAY ptrByteArray2 = new HCNetSDK.BYTE_ARRAY(256);
         //这里是库的绝对路径，请根据实际情况修改，注意改路径必须有访问权限
-        String strPathCom = hkProperty.getPath();
+        String strPathCom = property.getSdkPath();
         String strPath1 = strPathCom + "/libcrypto.so.1.1";
         String strPath2 = strPathCom + "/libssl.so.1.1";
 
@@ -154,7 +169,7 @@ public class HkInit {
         // 设备信息, 输出参数
         int lUserID = hCNetSDK.NET_DVR_Login_V40(m_strLoginInfo, m_strDeviceInfo);
         if (lUserID < 0) {
-            log.info("【海康初始化】注册登录失败: {}", hCNetSDK.NET_DVR_GetErrorMsg(null));
+            log.info("【海康车牌摄像头初始化】注册登录失败: {}", hCNetSDK.NET_DVR_GetErrorMsg(null));
             hCNetSDK.NET_DVR_Cleanup();
             return -1;
         }
@@ -182,12 +197,12 @@ public class HkInit {
         lpSetupParam.byAlarmInfoType = 1;
         int lAlarmHandle = hCNetSDK.NET_DVR_SetupAlarmChan_V41(lUserID, lpSetupParam);
         if (lAlarmHandle < 0) {
-            log.info("【海康初始化】启用布防失败: {}", hCNetSDK.NET_DVR_GetLastError());
+            log.info("【海康车牌摄像头初始化】启用布防失败: {}", hCNetSDK.NET_DVR_GetLastError());
             hCNetSDK.NET_DVR_Logout(lUserID);
             hCNetSDK.NET_DVR_Cleanup();
             return;
         }
-        log.info("【海康初始化】布防成功,开始监测车辆");
+        log.info("【海康车牌摄像头初始化】布防成功,开始监测车辆");
     }
 
     /**
@@ -207,10 +222,10 @@ public class HkInit {
      * 回调
      */
     public boolean callback(int lCommand, HCNetSDK.NET_DVR_ALARMER pAlarmer, Pointer pAlarmInfo, int dwBufLen, Pointer pUser) {
-        log.info("【海康回调】进入回调 开始识别车牌 lCommand: 0x{}", Integer.toHexString(lCommand));
+        log.info("【海康车牌摄像头回调】进入回调 开始识别车牌 lCommand: 0x{}", Integer.toHexString(lCommand));
         switch (lCommand) {
             case HCNetSDK.COMM_ITS_PLATE_RESULT:
-                log.info("【海康回调】交通抓拍的终端图片上传");
+                log.info("【海康车牌摄像头回调】交通抓拍的终端图片上传");
                 HCNetSDK.NET_ITS_PLATE_RESULT strItsPlateResult = new HCNetSDK.NET_ITS_PLATE_RESULT();
                 strItsPlateResult.write();
                 Pointer pItsPlateInfo = strItsPlateResult.getPointer();
@@ -223,18 +238,23 @@ public class HkInit {
                     String plateNumber = license.substring(1).trim();
                     String byCountry = license.substring(1, 2).trim();
                     String byColor = license.substring(0, 1).trim();
-                    log.info("【海康回调】车辆类型: {}", type);
-                    log.info("【海康回调】车牌号: {}", plateNumber);
-                    log.info("【海康回调】车牌省份: {}", byCountry);
-                    log.info("【海康回调】车牌颜色: {}", byColor);
+                    log.info("【海康车牌摄像头回调】车辆类型: {}", type);
+                    log.info("【海康车牌摄像头回调】车牌号: {}", plateNumber);
+                    log.info("【海康车牌摄像头回调】车牌省份: {}", byCountry);
+                    log.info("【海康车牌摄像头回调】车牌颜色: {}", byColor);
                     // 报警图片保存，车牌，车辆图片
                     for (int i = 0; i < strItsPlateResult.dwPicNum; i++) {
-                        if (strItsPlateResult.struPicInfo[i].dwDataLen > 0) {
-                            byte byType = strItsPlateResult.struPicInfo[i].byType;
-                            long offset = 0;
-                            ByteBuffer buffers = strItsPlateResult.struPicInfo[i].pBuffer.getByteBuffer(offset, strItsPlateResult.struPicInfo[i].dwDataLen);
-                            byte[] bytes = new byte[strItsPlateResult.struPicInfo[i].dwDataLen];
-                            log.info("【海康回调】图片类型: {}", byType);
+                        HCNetSDK.NET_ITS_PICTURE_INFO pic = strItsPlateResult.struPicInfo[i];
+                        if (pic.dwDataLen > 0) {
+                            // 0.车牌照片 1.场景照片
+                            byte byType = pic.byType;
+                            ByteBuffer buffers = pic.pBuffer.getByteBuffer(0, pic.dwDataLen);
+                            byte[] bytes = new byte[pic.dwDataLen];
+                            buffers.rewind();
+                            buffers.get(bytes);
+                            log.info("【海康车牌摄像头回调】图片类型: {}", byType);
+                            // 写到本地
+                            String imgPath = this.writeFile(bytes, String.valueOf(byType));
                         }
                     }
                 } catch (UnsupportedEncodingException e) {
@@ -242,9 +262,101 @@ public class HkInit {
                 }
                 break;
             case HCNetSDK.COMM_VEHICLE_CONTROL_ALARM:
-                log.info("【海康回调】车辆报警上传");
+                log.info("【海康车牌摄像头回调】车辆报警上传");
                 break;
         }
         return true;
+    }
+
+    /**
+     * 写到本地
+     */
+    private String writeFile(byte[] bs, String suffix) {
+        String filename = UUID.randomUUID() + "_" + suffix + ".jpg", path = property.getImgPath() + filename;
+        File file = new File(path);
+        try (FileOutputStream fos = new FileOutputStream(file);
+             BufferedOutputStream bos = new BufferedOutputStream(fos)) {
+            bos.write(bs);
+        } catch (Exception e) {
+            log.error("【海康摄像头写入图片失败】", e);
+            return null;
+        }
+        return path;
+    }
+
+    /**
+     * 海康全彩摄像头拍照
+     */
+    public List<String> takePhoto() {
+        List<String> imgList = Lists.newArrayList();
+        List<HkCameraParam> cameraList = property.getCamera();
+        for (HkCameraParam camera : cameraList) {
+            long start = System.currentTimeMillis();
+            String img = this.takePhoto(camera.getDeviceIp(),
+                    camera.getUsername(), camera.getPassword(), camera.getPort());
+            if (StrUtil.isNotBlank(img)) {
+                imgList.add(img);
+            }
+            log.info("【海康全彩摄像头】ip: {}, 拍照用时: {}ms", camera.getDeviceIp(), (System.currentTimeMillis() - start));
+        }
+        return imgList;
+    }
+
+    /**
+     * 海康全彩摄像头拍照
+     */
+    public String takePhoto(String deviceIp, String username, String password, Short port) {
+        // 设备信息
+        int lUserID = this.cameraInit(deviceIp, username, password, port);
+        if (lUserID < 0) {
+            return null;
+        }
+        // 写到本地
+        return this.writeFile(this.takePhoto(lUserID), deviceIp.substring(deviceIp.lastIndexOf(".") + 1));
+    }
+
+    /**
+     * 海康全彩摄像头初始化
+     */
+    private int cameraInit(String deviceIp, String username, String password, Short port) {
+        if (hCNetSDK == null) {
+            if (!this.createSDKInstance()) {
+                log.info("【海康全彩摄像头】加载SDK失败");
+                return -1;
+            }
+        }
+        // 初始化
+        if (!hCNetSDK.NET_DVR_Init()) {
+            log.info("【海康全彩摄像头】初始化失败");
+            return -1;
+        }
+        log.info("【海康全彩摄像头】初始化成功");
+        // 设备信息
+        return this.login(deviceIp, username, password, port);
+    }
+
+    /**
+     * 海康全彩摄像头拍照
+     */
+    private byte[] takePhoto(int lUserID) {
+        // JPEG图像参数
+        HCNetSDK.NET_DVR_JPEGPARA lpJpegPara = new HCNetSDK.NET_DVR_JPEGPARA();
+        // 设置图片的分辨率
+        lpJpegPara.wPicSize = 2;
+        // 设置图片质量
+        lpJpegPara.wPicQuality = 0;
+        // 通道号、输入缓冲区大小
+        int channel = 1, dwPicSize = 1024 * 1024;
+        // 保存JPEG数据的缓冲区
+        Pointer sJpegPicBuffer = new Memory(dwPicSize);
+        // 返回图片数据的大小
+        IntByReference reference = new IntByReference();
+        // 抓拍
+        hCNetSDK.NET_DVR_CaptureJPEGPicture_NEW(lUserID, channel, lpJpegPara, sJpegPicBuffer, dwPicSize, reference);
+        // 图片大小
+        int value = reference.getValue();
+        log.info("【海康全彩摄像头】图片大小: {}", value);
+        // 图片byte
+        return sJpegPicBuffer.getByteArray(0, value);
     }
 }
